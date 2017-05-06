@@ -57,6 +57,7 @@ T getParam(const ros::NodeHandle& nh, const std::string& param_name, T default_v
   if (nh.hasParam(param_name))
   {
     nh.getParam(param_name, value);
+    ROS_INFO_STREAM("Parameter '" << param_name << "' specified, set to '" << value << "'");
   }
   else
   {
