@@ -237,7 +237,7 @@ bool detectPosesCallback(image_recognition_msgs::GetPersons::Request& req, image
 
 int main(int argc, char *argv[])
 {
-  ros::init(argc, argv, "image_recognition_msgs");
+  ros::init(argc, argv, "openpose_ros");
 
   ros::NodeHandle local_nh("~");
 
