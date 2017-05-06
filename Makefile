@@ -360,6 +360,19 @@ endif
 INCLUDE_DIRS += $(BLAS_INCLUDE)
 LIBRARY_DIRS += $(BLAS_LIB)
 
+# Add ROS
+INCLUDE_DIRS += /opt/ros/kinetic/include
+INCLUDE_DIRS += /home/rein/ros/kinetic/system/devel/include
+INCLUDE_DIRS += /home/rein/ros/kinetic/dev/devel/include
+LIBRARY_DIRS += /opt/ros/kinetic/lib
+LIBRARIES += roscpp
+LIBRARIES += rosconsole
+LIBRARIES += roscpp_serialization
+LIBRARIES += cv_bridge
+# LIBRARY_DIRS += /home/rein/ros/kinetic/system/devel/lib
+# LIBRARY_DIRS += /home/rein/ros/kinetic/dev/devel/lib
+
+
 LIBRARY_DIRS += $(LIB_BUILD_DIR)
 
 # Automatic dependency generation (nvcc is handled separately)
