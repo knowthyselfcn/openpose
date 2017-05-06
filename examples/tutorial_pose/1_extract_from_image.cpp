@@ -1,3 +1,4 @@
+#define USE_CAFFE
 // OpenPose dependencies
 #include <openpose/core/headers.hpp>
 #include <openpose/filestream/headers.hpp>
@@ -24,6 +25,23 @@ unsigned int g_num_gpu_start;
 double g_scale_gap;
 double g_alpha_pose;
 op::PoseModel g_pose_model;
+
+std::string getTimeAsString(std::string format_string)
+{
+  time_t t = time(0);   // get time now
+  struct tm* timeinfo = localtime( & t );
+
+  format_string += '\a'; //force at least one character in the result
+  std::string buffer;
+  buffer.resize(format_string.size());
+  int len = strftime(&buffer[0], buffer.size(), format_string.c_str(), timeinfo);
+  while (len == 0) {
+    buffer.resize(buffer.size()*2);
+    len = strftime(&buffer[0], buffer.size(), format_string.c_str(), timeinfo);
+  }
+  buffer.resize(len-1); //remove that trailing '\a'
+  return buffer;
+}
 
 //!
 //! \brief getParam Get parameter from node handle
@@ -98,56 +116,54 @@ image_recognition_msgs::BodypartDetection getNANBodypart()
 
 bool detectPosesCallback(image_recognition_msgs::GetPersons::Request& req, image_recognition_msgs::GetPersons::Response& res)
 {
-    ROS_INFO("detectPosesCallback");
+  ROS_INFO("detectPosesCallback");
 
-    // Convert ROS message to opencv image
-    cv_bridge::CvImagePtr cv_ptr;
-    try
-    {
-        cv_ptr = cv_bridge::toCvCopy(req.image, req.image.encoding);
-    }
-    catch (cv_bridge::Exception& e)
-    {
-        ROS_ERROR("detectPosesCallback cv_bridge exception: %s", e.what());
-        return false;
-    }
-    cv::Mat image = cv_ptr->image;
-    if(image.empty())
-    {
-      ROS_ERROR("Empty image!");
-      return false;
-    }
+  // Convert ROS message to opencv image
+  cv_bridge::CvImagePtr cv_ptr;
+  try
+  {
+    cv_ptr = cv_bridge::toCvCopy(req.image, req.image.encoding);
+  }
+  catch (cv_bridge::Exception& e)
+  {
+    ROS_ERROR("detectPosesCallback cv_bridge exception: %s", e.what());
+    return false;
+  }
+  cv::Mat image = cv_ptr->image;
+  if(image.empty())
+  {
+    ROS_ERROR("Empty image!");
+    return false;
+  }
 
-    // Step 3 - Initialize all required classes
-    op::CvMatToOpInput cv_mat_to_input{g_net_input_size, g_num_scales, (float) g_scale_gap};
-    op::CvMatToOpOutput cv_mat_to_output{g_output_size};
+  // Step 3 - Initialize all required classes
+  op::CvMatToOpInput cv_mat_to_input{g_net_input_size, (int) g_num_scales, (float) g_scale_gap};
+  op::CvMatToOpOutput cv_mat_to_output{g_output_size};
 
-    op::PoseRenderer pose_renderer{g_net_output_size, g_output_size, g_pose_model, nullptr, (float) g_alpha_pose};
-    op::OpOutputToCvMat op_output_to_cv_mat{g_output_size};
-    const cv::Size windowed_size = g_output_size;
-    //op::FrameDisplayer frame_displayer{windowed_size, "OpenPose Tutorial - Example 1"};
+  op::PoseRenderer pose_renderer{g_net_output_size, g_output_size, g_pose_model, nullptr, (float) g_alpha_pose};
+  op::OpOutputToCvMat op_output_to_cv_mat{g_output_size};
 
-    pose_renderer.initializationOnThread();
+  pose_renderer.initializationOnThread();
 
+  // Step 2 - Format input image to OpenPose input and output formats
+  const auto net_input_array = cv_mat_to_input.format(image);
+  double scale_input_to_output;
+  op::Array<float> output_array;
+  std::tie(scale_input_to_output, output_array) = cv_mat_to_output.format(image);
+  // Step 3 - Estimate poseKeyPoints
+  g_pose_extractor->forwardPass(net_input_array, image.size());
+  const auto pose_keypoints = g_pose_extractor->getPoseKeyPoints();
+  // Step 4 - Render poseKeyPoints
+  pose_renderer.renderPose(output_array, pose_keypoints);
+  // Step 5 - OpenPose output format to cv::Mat
+  cv::Mat output_image = op_output_to_cv_mat.formatToCvMat(output_array);
 
-    // Step 2 - Format input image to OpenPose input and output formats
-    const auto net_input_array = cv_mat_to_input.format(image);
-    double scale_input_to_output;
-    op::Array<float> output_array;
-    std::tie(scale_input_to_output, output_array) = cv_mat_to_output.format(image);
-    // Step 3 - Estimate poseKeyPoints
-    g_pose_extractor->forwardPass(net_input_array, image.size());
-    const auto pose_keypoints = g_pose_extractor->getPoseKeyPoints();
-    // Step 4 - Render poseKeyPoints
-    pose_renderer.renderPose(output_array, pose_keypoints);
-    // Step 5 - OpenPose output format to cv::Mat
-    auto output_image = op_output_to_cv_mat.formatToCvMat(output_array);
+  // Write to disk
+  std::string output_filepath = "/tmp/" + getTimeAsString("%Y-%m-%d-%H-%M-%S") + "_openpose_ros.jpg";
+  ROS_INFO("Writing output to %s", output_filepath.c_str());
+  cv::imwrite(output_filepath, output_image);
 
-    // ------------------------- SHOWING RESULT AND CLOSING -------------------------
-    // Step 1 - Show results
-    //frame_displayer.displayFrame(output_image, 0); // Alternative: cv::imshow(outputImage) + cv::waitKey(0)
-
-    if (!pose_keypoints.empty() && pose_keypoints.getNumberDimensions() != 3)
+  if (!pose_keypoints.empty() && pose_keypoints.getNumberDimensions() != 3)
   {
     ROS_ERROR("pose.getNumberDimensions(): %d != 3", (int) pose_keypoints.getNumberDimensions());
     return false;
@@ -221,31 +237,31 @@ bool detectPosesCallback(image_recognition_msgs::GetPersons::Request& req, image
 
 int main(int argc, char *argv[])
 {
-    ros::init(argc, argv, "image_recognition_msgs");
+  ros::init(argc, argv, "image_recognition_msgs");
 
-    ros::NodeHandle local_nh("~");
+  ros::NodeHandle local_nh("~");
 
-    g_net_input_size = cv::Size(getParam(local_nh, "net_input_width", 656), getParam(local_nh, "net_input_height", 368));
-    g_net_output_size = cv::Size(getParam(local_nh, "net_output_width", 656), getParam(local_nh, "net_output_height", 368));
-    g_output_size = cv::Size(getParam(local_nh, "output_width", 1280), getParam(local_nh, "output_height", 720));
-    g_num_scales = getParam(local_nh, "num_scales", 1);
-    g_scale_gap = getParam(local_nh, "scale_gap", 0.3);
-    g_num_gpu_start = getParam(local_nh, "num_gpu_start", 0);
-    g_model_folder = getParam(local_nh, "model_folder", std::string("/home/rein/openpose/models/"));
-    g_pose_model = stringToPoseModel(getParam(local_nh, "pose_model", std::string("COCO")));
-    g_bodypart_map = getBodyPartMapFromPoseModel(g_pose_model);
-    g_alpha_pose = getParam(local_nh, "alpha_pose", 0.6);
+  g_net_input_size = cv::Size(getParam(local_nh, "net_input_width", 656), getParam(local_nh, "net_input_height", 368));
+  g_net_output_size = cv::Size(getParam(local_nh, "net_output_width", 656), getParam(local_nh, "net_output_height", 368));
+  g_output_size = cv::Size(getParam(local_nh, "output_width", 1280), getParam(local_nh, "output_height", 720));
+  g_num_scales = getParam(local_nh, "num_scales", 1);
+  g_scale_gap = getParam(local_nh, "scale_gap", 0.3);
+  g_num_gpu_start = getParam(local_nh, "num_gpu_start", 0);
+  g_model_folder = getParam(local_nh, "model_folder", std::string("/home/rein/openpose/models/"));
+  g_pose_model = stringToPoseModel(getParam(local_nh, "pose_model", std::string("COCO")));
+  g_bodypart_map = getBodyPartMapFromPoseModel(g_pose_model);
+  g_alpha_pose = getParam(local_nh, "alpha_pose", 0.6);
 
-    ros::NodeHandle nh;
-    ros::ServiceServer service = nh.advertiseService("detect_poses", detectPosesCallback);
+  ros::NodeHandle nh;
+  ros::ServiceServer service = nh.advertiseService("detect_persons", detectPosesCallback);
 
-    g_pose_extractor = std::shared_ptr<op::PoseExtractorCaffe>(
+  g_pose_extractor = std::shared_ptr<op::PoseExtractorCaffe>(
         new op::PoseExtractorCaffe(g_net_input_size, g_net_output_size, g_output_size, g_num_scales, (float) g_scale_gap, g_pose_model,
-                                              g_model_folder, g_num_gpu_start));
-    g_pose_extractor->initializationOnThread();
-    
+                                   g_model_folder, g_num_gpu_start));
+  g_pose_extractor->initializationOnThread();
 
-    ros::spin();
 
-    return 0;
+  ros::spin();
+
+  return 0;
 }
