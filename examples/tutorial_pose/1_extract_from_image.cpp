@@ -24,7 +24,9 @@ unsigned int g_num_scales;
 unsigned int g_num_gpu_start;
 double g_scale_gap;
 double g_alpha_pose;
+bool g_publish_output;
 op::PoseModel g_pose_model;
+ros::Publisher g_pub;
 
 std::string getTimeAsString(std::string format_string)
 {
@@ -164,6 +166,21 @@ bool detectPosesCallback(image_recognition_msgs::GetPersons::Request& req, image
   ROS_INFO("Writing output to %s", output_filepath.c_str());
   cv::imwrite(output_filepath, output_image);
 
+  // Publish to topic
+  if ( g_publish_output )
+  {
+  try
+    {
+      sensor_msgs::ImagePtr msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", output_image).toImageMsg();
+      g_pub.publish(msg);
+    }
+    catch (cv_bridge::Exception& e)
+    {
+      ROS_ERROR("detectPosesCallback cv_bridge exception: %s", e.what());
+      return false;
+    }
+  }
+
   if (!pose_keypoints.empty() && pose_keypoints.getNumberDimensions() != 3)
   {
     ROS_ERROR("pose.getNumberDimensions(): %d != 3", (int) pose_keypoints.getNumberDimensions());
@@ -252,9 +269,14 @@ int main(int argc, char *argv[])
   g_pose_model = stringToPoseModel(getParam(local_nh, "pose_model", std::string("COCO")));
   g_bodypart_map = getBodyPartMapFromPoseModel(g_pose_model);
   g_alpha_pose = getParam(local_nh, "alpha_pose", 0.6);
+  g_publish_output = getParam(local_nh, "publish_output", true);
 
   ros::NodeHandle nh;
   ros::ServiceServer service = nh.advertiseService("detect_persons", detectPosesCallback);
+  if ( g_publish_output )
+  {
+  g_pub = nh.advertise<sensor_msgs::Image>("output_image", 1);
+  }
 
   g_pose_extractor = std::shared_ptr<op::PoseExtractorCaffe>(
         new op::PoseExtractorCaffe(g_net_input_size, g_net_output_size, g_output_size, g_num_scales, (float) g_scale_gap, g_pose_model,
