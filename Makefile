@@ -367,8 +367,8 @@ LIBRARY_DIRS += $(BLAS_LIB)
 
 # Add ROS
 INCLUDE_DIRS += /opt/ros/kinetic/include
-INCLUDE_DIRS += /home/rein/ros/kinetic/system/devel/include
-INCLUDE_DIRS += /home/rein/ros/kinetic/dev/devel/include
+INCLUDE_DIRS += /home/ubuntu/ros/kinetic/system/devel/include
+INCLUDE_DIRS += /home/ubuntu/ros/kinetic/dev/devel/include
 LIBRARY_DIRS += /opt/ros/kinetic/lib
 LIBRARIES += roscpp
 LIBRARIES += rosconsole

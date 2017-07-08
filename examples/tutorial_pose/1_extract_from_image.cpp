@@ -1,6 +1,5 @@
-#define USE_CAFFE
 // OpenPose dependencies
-#include <openpose/core/headers.hpp>
+#include <openpose/headers.hpp>
 #include <openpose/filestream/headers.hpp>
 #include <openpose/gui/headers.hpp>
 #include <openpose/pose/headers.hpp>
@@ -15,17 +14,18 @@
 #include <image_recognition_msgs/GetPersons.h>
 
 std::shared_ptr<op::PoseExtractor> g_pose_extractor;
-std::map<unsigned char, std::string> g_bodypart_map;
+std::map<unsigned int, std::string> g_bodypart_map;
 std::string g_model_folder;
-cv::Size g_net_input_size;
-cv::Size g_net_output_size;
-cv::Size g_output_size;
+op::Point<int> g_net_input_size;
+op::Point<int> g_net_output_size;
+op::Point<int> g_output_size;
 unsigned int g_num_scales;
 unsigned int g_num_gpu_start;
 double g_scale_gap;
 double g_alpha_pose;
 bool g_publish_output;
 op::PoseModel g_pose_model;
+
 ros::Publisher g_pub;
 
 std::string getTimeAsString(std::string format_string)
@@ -84,7 +84,7 @@ op::PoseModel stringToPoseModel(const std::string& pose_model_string)
   }
 }
 
-std::map<unsigned char, std::string> getBodyPartMapFromPoseModel(const op::PoseModel& pose_model)
+std::map<unsigned int, std::string> getBodyPartMapFromPoseModel(const op::PoseModel& pose_model)
 {
   if (pose_model == op::PoseModel::COCO_18)
   {
@@ -140,22 +140,26 @@ bool detectPosesCallback(image_recognition_msgs::GetPersons::Request& req, image
   }
 
   // Step 3 - Initialize all required classes
-  op::CvMatToOpInput cv_mat_to_input{g_net_input_size, (int) g_num_scales, (float) g_scale_gap};
-  op::CvMatToOpOutput cv_mat_to_output{g_output_size};
+  op::CvMatToOpInput cv_mat_to_input(g_net_input_size, (int) g_num_scales, g_scale_gap);
+  op::CvMatToOpOutput cv_mat_to_output(g_output_size);
 
-  op::PoseRenderer pose_renderer{g_net_output_size, g_output_size, g_pose_model, nullptr, (float) g_alpha_pose};
-  op::OpOutputToCvMat op_output_to_cv_mat{g_output_size};
+  op::PoseRenderer pose_renderer(g_net_output_size, g_output_size, g_pose_model, nullptr, (float) g_alpha_pose);
+  op::OpOutputToCvMat op_output_to_cv_mat(g_output_size);
 
   pose_renderer.initializationOnThread();
 
   // Step 2 - Format input image to OpenPose input and output formats
-  const auto net_input_array = cv_mat_to_input.format(image);
+  //const auto net_input_array = cv_mat_to_input.format(image);
   double scale_input_to_output;
+  op::Array<float> net_input_array;
+  std::vector<float> scale_ratios;
+  std::tie(net_input_array, scale_ratios) = cv_mat_to_input.format(image);
   op::Array<float> output_array;
   std::tie(scale_input_to_output, output_array) = cv_mat_to_output.format(image);
   // Step 3 - Estimate poseKeyPoints
-  g_pose_extractor->forwardPass(net_input_array, image.size());
-  const auto pose_keypoints = g_pose_extractor->getPoseKeyPoints();
+  g_pose_extractor->forwardPass(net_input_array, {image.cols, image.rows}, scale_ratios);
+  const auto pose_keypoints = g_pose_extractor->getPoseKeypoints();
+
   // Step 4 - Render poseKeyPoints
   pose_renderer.renderPose(output_array, pose_keypoints);
   // Step 5 - OpenPose output format to cv::Mat
@@ -259,9 +263,9 @@ int main(int argc, char *argv[])
 
   ros::NodeHandle local_nh("~");
 
-  g_net_input_size = cv::Size(getParam(local_nh, "net_input_width", 656), getParam(local_nh, "net_input_height", 368));
-  g_net_output_size = cv::Size(getParam(local_nh, "net_output_width", 656), getParam(local_nh, "net_output_height", 368));
-  g_output_size = cv::Size(getParam(local_nh, "output_width", 1280), getParam(local_nh, "output_height", 720));
+  g_net_input_size = op::Point<int>(getParam(local_nh, "net_input_width", 656), getParam(local_nh, "net_input_height", 368));
+  g_net_output_size = op::Point<int>(getParam(local_nh, "net_output_width", 656), getParam(local_nh, "net_output_height", 368));
+  g_output_size = op::Point<int>(getParam(local_nh, "output_width", 1280), getParam(local_nh, "output_height", 720));
   g_num_scales = getParam(local_nh, "num_scales", 1);
   g_scale_gap = getParam(local_nh, "scale_gap", 0.3);
   g_num_gpu_start = getParam(local_nh, "num_gpu_start", 0);
@@ -279,7 +283,7 @@ int main(int argc, char *argv[])
   }
 
   g_pose_extractor = std::shared_ptr<op::PoseExtractorCaffe>(
-        new op::PoseExtractorCaffe(g_net_input_size, g_net_output_size, g_output_size, g_num_scales, (float) g_scale_gap, g_pose_model,
+        new op::PoseExtractorCaffe(g_net_input_size, g_net_output_size, g_output_size, g_num_scales, g_pose_model,
                                    g_model_folder, g_num_gpu_start));
   g_pose_extractor->initializationOnThread();
 
